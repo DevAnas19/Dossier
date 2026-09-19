@@ -26,6 +26,43 @@ def web_search(query: str) -> str:
 
 
 @tool
+def academic_search(query: str) -> str:
+    """Search academic literature (Semantic Scholar) for a given query.
+    Returns Titles, URLs (to the paper page), and abstract snippets.
+    Use this for claims that need scholarly / peer-reviewed backing."""
+    try:
+        response = requests.get(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            params={
+                "query": query,
+                "limit": 5,
+                "fields": "title,abstract,url,year,authors",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        papers = response.json().get("data", [])
+    except requests.exceptions.RequestException as e:
+        return f"Error searching academic sources: {str(e)}"
+
+    if not papers:
+        return "No academic results found."
+
+    out = []
+    for p in papers:
+        authors = ", ".join(a["name"] for a in (p.get("authors") or [])[:3])
+        abstract = (p.get("abstract") or "No abstract available.")[:300]
+        out.append(
+            f"Title: {p.get('title')}\n"
+            f"Year: {p.get('year')}\n"
+            f"Authors: {authors}\n"
+            f"URL: {p.get('url')}\n"
+            f"Abstract: {abstract}\n"
+        )
+    return "\n------\n".join(out)
+
+
+@tool
 def scrape_url(url: str) -> str:
     """
     Scrape a webpage from a given URL and return its clean text content.

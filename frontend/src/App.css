@@ -395,3 +395,24 @@ h4.report-heading { font-size: 17px; }
   .page-sheet-head h1 { font-size: 27px; }
   .page-sheet-body, .review-slip-body { font-size: 16px; }
 }
+
+/* ── Claim verification summary badges ─────────────────────────────── */
+.claim-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.claim-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.claim-supported   { background: #e6f4ea; color: #2d6a3f; }
+.claim-contradicted { background: #fdecea; color: #8b2118; }
+.claim-unresolved  { background: #f3f0e8; color: #6b6045; }

@@ -20,10 +20,12 @@ app.add_middleware(
 )
 
 STAGE_NAMES = {
-    1: "Searching the web",
-    2: "Reading top source",
-    3: "Drafting report",
-    4: "Reviewing report",
+    1: "Planning research",
+    2: "Researching (web + academic)",
+    3: "Extracting claims",
+    4: "Verifying claims",
+    5: "Drafting report",
+    6: "Reviewing report",
 }
 
 # Simple in-memory job store. Fine for a single-instance deployment / demo;
@@ -47,6 +49,7 @@ def _run_job(job_id: str, topic: str):
         jobs[job_id]["status"] = "completed"
         jobs[job_id]["report"] = result["report"]
         jobs[job_id]["feedback"] = result["feedback"]
+        jobs[job_id]["claim_summary"] = result.get("claim_summary", {})
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)

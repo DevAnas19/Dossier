@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { startResearch, getResearchStatus } from './api'
 
 const STAGES = [
-  { id: 1, label: 'Search' },
-  { id: 2, label: 'Read source' },
-  { id: 3, label: 'Draft report' },
-  { id: 4, label: 'Review' },
+  { id: 1, label: 'Plan' },
+  { id: 2, label: 'Research' },
+  { id: 3, label: 'Extract claims' },
+  { id: 4, label: 'Verify claims' },
+  { id: 5, label: 'Draft report' },
+  { id: 6, label: 'Review' },
 ]
 
 // Markdown-ish renderer for the LLM output: headers, bold, lists, and tables.
@@ -235,10 +237,12 @@ export default function App() {
           <div className="empty-hero-inner">
             <span className="empty-hero-kicker">How it works</span>
             <ol className="empty-hero-steps">
-              <li><strong>Search</strong> — a live agent pulls recent, relevant sources</li>
-              <li><strong>Read</strong> — it opens the best source and reads it in full</li>
-              <li><strong>Draft</strong> — a writer turns findings into a structured report</li>
-              <li><strong>Review</strong> — a critic checks it for gaps before you see it</li>
+              <li><strong>Plan</strong> — breaks your topic into focused sub-questions</li>
+              <li><strong>Research</strong> — web + academic sources searched in parallel per sub-question</li>
+              <li><strong>Extract</strong> — pulls discrete, checkable claims out of all the evidence</li>
+              <li><strong>Verify</strong> — each claim is scored against the evidence; missing ones are re-researched</li>
+              <li><strong>Draft</strong> — a writer turns verified findings into a structured report</li>
+              <li><strong>Review</strong> — a critic checks for gaps before you see it</li>
             </ol>
           </div>
         </section>
@@ -261,6 +265,19 @@ export default function App() {
                 <span className="stat-sep">·</span>
                 <span>{countSources(job.report)} sources cited</span>
               </div>
+              {job.claim_summary && (
+                <div className="claim-summary">
+                  <span className="claim-badge claim-supported">
+                    ✓ {job.claim_summary.supported ?? 0} supported
+                  </span>
+                  <span className="claim-badge claim-contradicted">
+                    ✕ {job.claim_summary.contradicted ?? 0} contradicted
+                  </span>
+                  <span className="claim-badge claim-unresolved">
+                    ◌ {job.claim_summary.unresolved ?? 0} unresolved
+                  </span>
+                </div>
+              )}
             </div>
             <div className="page-sheet-body">
               {renderReport(job.report)}

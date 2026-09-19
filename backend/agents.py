@@ -3,17 +3,35 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from tools import web_search, scrape_url
+from tools import web_search, scrape_url, academic_search
+import json
 import os
+import time
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# gpt-oss-120b is Groq's recommended replacement for the deprecated
-# llama-3.3-70b-versatile model. Swap this string if you want a different
-# free-tier Groq model.
-llm = ChatGroq(model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))
+# llama-3.1-8b-instant has a much higher free-tier TPM than gpt-oss-120b.
+# You can override via GROQ_MODEL in your .env if you want a bigger model.
+llm = ChatGroq(model=os.getenv("GROQ_MODEL", "openai/gpt-oss-safeguard-20b"))
+
+
+def _invoke_with_retry(chain, inputs: dict, max_retries: int = 4, base_wait: float = 8.0) -> str:
+    """Invoke a LangChain chain and retry on 429 / 503 errors with
+    exponential back-off. Raises the last exception if all retries fail."""
+    for attempt in range(max_retries):
+        try:
+            return chain.invoke(inputs)
+        except Exception as e:
+            err = str(e)
+            if any(code in err for code in ("429", "503", "rate_limit_exceeded", "UNAVAILABLE")):
+                wait = base_wait * (2 ** attempt)
+                print(f"[retry] API error ({err[:60]}), waiting {wait:.1f}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError(f"All {max_retries} retries failed (rate limit / service unavailable.")
 
 
 def build_search_agent():
@@ -27,6 +45,13 @@ def build_reader_agent():
     return create_agent(
         model=llm,
         tools=[scrape_url]
+    )
+
+
+def build_academic_agent():
+    return create_agent(
+        model=llm,
+        tools=[academic_search]
     )
 
 
@@ -94,3 +119,91 @@ A numbered markdown list of clear, direct directives on what the writer needs to
 ])
 
 critic_chain = critic_prompt | llm | StrOutputParser()
+
+
+# ---------------------------------------------------------------------------
+# v2 additions: planner, claim extraction, claim verification
+# ---------------------------------------------------------------------------
+
+def _parse_json_list(raw: str) -> list:
+    """Best-effort JSON list parse. LLMs sometimes wrap output in ```json
+    fences despite instructions not to — strip those before parsing."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+    try:
+        parsed = json.loads(cleaned.strip())
+        return parsed if isinstance(parsed, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+planner_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a research planner. Break a topic into a small set of "
+               "concrete, non-overlapping sub-questions that together cover it well."),
+    ("human", """Topic: {topic}
+
+Return EXACTLY 2 sub-queries that would find the key facts needed to write a
+thorough report on this topic. Respond with ONLY a JSON array of 2 strings,
+no preamble, no markdown fences. Example: ["sub-query one", "sub-query two"]
+""")
+])
+planner_chain = planner_prompt | llm | StrOutputParser()
+
+
+def plan_sub_queries(topic: str) -> list[str]:
+    sub_queries = _parse_json_list(_invoke_with_retry(planner_chain, {"topic": topic}))
+    if not sub_queries:
+        return [topic]
+    return sub_queries[:2]  # hard cap — never send more than 2 to the research stage
+
+
+claim_extraction_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You extract discrete, checkable factual claims from research notes. "
+               "Each claim should be a single self-contained statement that could be "
+               "individually verified as true or false against evidence."),
+    ("human", """Research notes on "{topic}":
+
+{evidence}
+
+Extract 4-8 distinct factual claims made or implied by these notes.
+Respond with ONLY a JSON array of strings (the claims), no preamble, no markdown fences.
+""")
+])
+claim_extraction_chain = claim_extraction_prompt | llm | StrOutputParser()
+
+
+def extract_claims(topic: str, evidence: str) -> list[str]:
+    # Truncate to ~3000 chars — enough signal, stays well under the 7K ITPM limit
+    trimmed = evidence[:3000]
+    return _parse_json_list(_invoke_with_retry(claim_extraction_chain, {"topic": topic, "evidence": trimmed}))
+
+
+verification_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a strict fact-checker. Judge whether a claim is backed by "
+               "given evidence. Do not use outside knowledge — judge only against "
+               "the evidence provided."),
+    ("human", """Claim: {claim}
+
+Evidence:
+{evidence}
+
+Does the evidence support this claim? Respond with ONLY one word:
+"supported" if the evidence clearly backs the claim,
+"contradicted" if the evidence clearly contradicts it,
+"missing" if the evidence says nothing relevant to judge it either way.
+""")
+])
+verification_chain = verification_prompt | llm | StrOutputParser()
+
+
+def verify_claim(claim: str, evidence: str) -> str:
+    # Truncate to ~2000 chars per verification call — claim + evidence must stay under 7K ITPM
+    trimmed = evidence[:2000]
+    result = _invoke_with_retry(verification_chain, {"claim": claim, "evidence": trimmed}).strip().lower()
+    for status in ("supported", "contradicted", "missing"):
+        if status in result:
+            return status
+    return "missing"
